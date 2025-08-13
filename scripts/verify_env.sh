@@ -4,7 +4,20 @@
 
 set -e
 
+# 确保uv在PATH中
+export PATH="$HOME/.cargo/bin:$PATH"
+
 echo "=== CUDA 12.1.1 + Python 3.12 环境验证 ==="
+echo ""
+
+# 检查uv
+echo "检查uv包管理器..."
+if command -v uv &> /dev/null; then
+    uv --version
+    echo "✅ uv已安装"
+else
+    echo "❌ uv未安装"
+fi
 echo ""
 
 # 检查Python版本

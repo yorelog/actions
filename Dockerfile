@@ -1,5 +1,33 @@
-# CUDA 12.1.1 基础镜像用于编译 PyTorch 和 vLLM
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+# CUDA 12.1.1 基础镜像用于编译 PyTo# 安装Python 3.1# 安装Python 3.12和相关工具
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 uv - 快速的 Python 包管理器
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && \
+    export PATH="$HOME/.cargo/bin:$PATH"
+
+# 设置Python 3.12为默认Python
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 uv - 快速的 Python 包管理器
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc && \
+    export PATH="$HOME/.cargo/bin:$PATH"
+
+# 设置Python 3.12为默认Python
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2M nvidia/cuda:12.1.1-devel-ubuntu22.04
 
 # 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive
@@ -31,27 +59,21 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     python3.12 \
     python3.12-dev \
     python3.12-venv \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置Python 3.12为默认Python
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && 
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2 && 
-    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 && 
-    python3.12 -m pip install --upgrade pip setuptools wheel
+# 安装 uv - 快速的 Python 包管理器
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
 
-# 安装pip和升级
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
-
-# 升级pip、setuptools和wheel
-RUN python3 -m pip install --upgrade pip setuptools wheel
+# 设置Python 3.12为默认Python和PATH
+ENV PATH="$HOME/.cargo/bin:$PATH"
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2
 
 # 安装编译所需的Python包
-RUN python3 -m pip install \
+RUN $HOME/.cargo/bin/uv pip install --system \
     numpy \
     pyyaml \
-    mkl \
-    mkl-include \
     setuptools \
     cmake \
     cffi \
@@ -59,7 +81,8 @@ RUN python3 -m pip install \
     future \
     six \
     requests \
-    dataclasses \
+    packaging \
+    wheel
     packaging \
     pillow
 

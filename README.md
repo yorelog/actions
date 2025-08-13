@@ -9,12 +9,15 @@
 - NVIDIA A800 (计算能力 8.0)
 - NVIDIA H20 (计算能力 8.9)
 
-## 技术规格
+## 核心特性
 
-- **CUDA版本**: 12.1.1
-- **Python版本**: 3.12
-- **操作系统**: Ubuntu 22.04 LTS
-- **支持架构**: 8.0, 8.6, 8.9 (专门优化)
+- 🚀 **CUDA 12.1.1 优化**: 专为最新CUDA版本优化
+- 🐍 **Python 3.12**: 使用最新Python版本获得最佳性能
+- ⚡ **uv 包管理器**: 比传统pip快10-100倍的包安装
+- 🎯 **GPU特定优化**: 支持RTX 3090Ti、A100、A800、H20
+- 🔧 **版本控制**: 支持指定PyTorch和vLLM版本编译
+- 🏗️ **GitHub Actions**: 自动化CI/CD构建流程
+- 📦 **输出优化**: 自动复制编译产物到指定目录
 
 ## 已收录项目
 
@@ -66,6 +69,12 @@ docker run --gpus all --rm -v $(pwd)/output:/output cu121-builder:latest \
 chmod +x install.sh
 ./install.sh
 ```
+
+## 文档
+
+- [UV包管理器使用指南](UV_USAGE.md) - 了解如何使用uv来管理Python包
+- [使用说明](USAGE.md) - 详细的使用指南
+- [GitHub Actions工作流](GITHUB_ACTIONS.md) - CI/CD配置说明
 
 ## 贡献
 

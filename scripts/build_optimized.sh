@@ -5,6 +5,9 @@
 
 set -e
 
+# 确保uv在PATH中
+export PATH="$HOME/.cargo/bin:$PATH"
+
 # 检测GPU型号并设置优化参数
 detect_gpu_and_optimize() {
     echo "检测GPU型号..."
@@ -165,7 +168,7 @@ build_vllm_optimized() {
     
     # 安装依赖
     echo "安装vLLM依赖..."
-    python3 -m pip install -r requirements.txt
+    uv pip install --system -r requirements.txt
     
     # 设置vLLM编译环境
     export VLLM_INSTALL_PUNICA_KERNELS=1
