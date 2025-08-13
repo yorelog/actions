@@ -30,13 +30,15 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && apt-get install -y \
     python3.12 \
     python3.12-dev \
-    python3.12-distutils \
+    python3.12-venv \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置Python 3.12为默认python3
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
+# 设置Python 3.12为默认Python
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && 
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 2 && 
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 && 
+    python3.12 -m pip install --upgrade pip setuptools wheel
 
 # 安装pip和升级
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
