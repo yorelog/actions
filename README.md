@@ -1,17 +1,25 @@
+````markdown
 # cu121
 
 本仓库用于发布针对 CUDA 12.1 构建的主流 AI/ML 库（如 PyTorch、vLLM 等）的预编译二进制文件（binaries）、wheel 包以及安装脚本，旨在方便开发者和研究者在最新的 GPU 上快速使用深度学习框架。
 
 **本项目专为如下 GPU 设计和优化：**
-- NVIDIA A100
-- NVIDIA A800
-- NVIDIA H20
-- 以及其他支持 CUDA 12.1 的现代数据中心级显卡
+- NVIDIA RTX 3090Ti (计算能力 8.6)
+- NVIDIA A100 (计算能力 8.0)
+- NVIDIA A800 (计算能力 8.0)
+- NVIDIA H20 (计算能力 8.9)
+
+## 技术规格
+
+- **CUDA版本**: 12.1.1
+- **Python版本**: 3.12
+- **操作系统**: Ubuntu 22.04 LTS
+- **支持架构**: 8.0, 8.6, 8.9 (专门优化)
 
 ## 已收录项目
 
-- **PyTorch**（CUDA 12.1 构建）
-- **vLLM**
+- **PyTorch**（CUDA 12.1 + Python 3.12 构建）
+- **vLLM**（针对目标GPU优化）
 - 计划支持更多 AI/ML 库
 
 ## Releases
@@ -20,13 +28,44 @@
 
 ## 使用方法
 
+### 本地构建
+
 以安装 PyTorch 为例：
 
 ```bash
-pip install https://github.com/yorelog/cu121/releases/download/{version}/torch-{version}-cu121.whl
+# 克隆仓库
+git clone https://github.com/yorelog/cu121.git
+cd cu121
+
+# 构建环境
+./build.sh
+
+# 编译指定版本
+docker run --gpus all --rm -v $(pwd)/output:/output cu121-builder:latest \
+  /scripts/build_optimized.sh pytorch 2.8.0
 ```
 
-请将 `{version}` 替换为所需的版本号。
+### GitHub Actions自动构建
+
+我们提供完整的GitHub Actions工作流来自动构建PyTorch和vLLM：
+
+1. **前往Actions页面**: [GitHub Actions](../../actions)
+2. **选择工作流**: `Build PyTorch 2.8.0 + vLLM 0.10.0 for CUDA 12.1`
+3. **点击Run workflow**并配置参数
+4. **等待构建完成**，在Releases页面下载
+
+详细说明请参考: [GitHub Actions使用指南](GITHUB_ACTIONS.md)
+
+### 预编译下载
+
+请前往 [Releases](https://github.com/yorelog/cu121/releases) 页面获取最新的二进制文件与安装说明。
+
+快速安装：
+```bash
+# 下载最新release的install.sh脚本
+chmod +x install.sh
+./install.sh
+```
 
 ## 贡献
 

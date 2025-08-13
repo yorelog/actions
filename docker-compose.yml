@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  cu121-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cu121-builder:latest
+    container_name: cu121-builder
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./output:/output
+      - ./workspace:/workspace
+      - ccache-volume:/root/.ccache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+volumes:
+  ccache-volume:
+    driver: local

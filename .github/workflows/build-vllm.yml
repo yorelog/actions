@@ -1,0 +1,298 @@
+name: Build vLLM 0.10.0 for CUDA 12.1
+
+on:
+  workflow_dispatch:
+    inputs:
+      vllm_version:
+        description: 'vLLM版本'
+        required: true
+        default: '0.10.0'
+        type: string
+      gpu_arch:
+        description: 'CUDA架构'
+        required: true
+        default: '8.0;8.6;8.9'
+        type: string
+  push:
+    tags:
+      - 'vllm-*'
+  schedule:
+    # 每周日UTC时间06:00运行
+    - cron: '0 6 * * 0'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/cu121-builder
+
+jobs:
+  build-vllm:
+    runs-on: self-hosted
+    # 需要支持GPU的runner
+    # runs-on: [self-hosted, gpu]
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        include:
+          - gpu_type: "A100"
+            cuda_arch: "8.0"
+          - gpu_type: "RTX3090Ti"
+            cuda_arch: "8.6"
+          - gpu_type: "H20"
+            cuda_arch: "8.9"
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=sha
+    
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: cu121-builder:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64
+    
+    - name: Check GPU availability
+      run: |
+        docker run --gpus all --rm cu121-builder:latest nvidia-smi || echo "GPU not available in CI"
+    
+    - name: Create output directory
+      run: mkdir -p output
+    
+    - name: Install PyTorch dependency
+      run: |
+        # vLLM需要预先安装PyTorch
+        echo "Installing PyTorch as dependency for vLLM..."
+        docker run --gpus all --rm \
+          -v $(pwd)/output:/output \
+          cu121-builder:latest bash -c "
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+          "
+    
+    - name: Build vLLM ${{ inputs.vllm_version || '0.10.0' }}
+      run: |
+        # 设置构建参数
+        VLLM_VERSION="${{ inputs.vllm_version || '0.10.0' }}"
+        CUDA_ARCH="${{ inputs.gpu_arch || '8.0;8.6;8.9' }}"
+        
+        echo "Building vLLM version: $VLLM_VERSION"
+        echo "CUDA architectures: $CUDA_ARCH"
+        
+        # 运行构建
+        docker run --gpus all --rm \
+          -v $(pwd)/output:/output \
+          -v $(pwd)/workspace:/workspace \
+          -e TORCH_CUDA_ARCH_LIST="$CUDA_ARCH" \
+          -e CUDA_ARCH_LIST="$CUDA_ARCH" \
+          cu121-builder:latest bash -c "
+            # 安装PyTorch
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            
+            # 构建vLLM
+            /scripts/build_optimized.sh vllm $VLLM_VERSION
+          "
+      timeout-minutes: 240  # 4小时超时
+    
+    - name: List built files
+      run: |
+        echo "Built vLLM files:"
+        ls -la output/
+        
+        # 检查wheel文件
+        if ls output/vllm-*.whl 1> /dev/null 2>&1; then
+          echo "✅ vLLM wheel文件构建成功"
+          for file in output/vllm-*.whl; do
+            echo "  - $(basename $file) ($(du -h $file | cut -f1))"
+          done
+        else
+          echo "❌ 未找到vLLM wheel文件"
+          exit 1
+        fi
+    
+    - name: Test vLLM wheel
+      run: |
+        # 测试安装和基本功能
+        docker run --gpus all --rm \
+          -v $(pwd)/output:/wheels \
+          cu121-builder:latest bash -c "
+            # 安装PyTorch
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            
+            # 安装vLLM
+            pip install /wheels/vllm-*.whl
+            
+            # 基本测试
+            python3 -c 'import vllm; print(f\"vLLM version: {vllm.__version__}\")'
+            python3 -c 'from vllm import LLM; print(\"vLLM import successful\")'
+          "
+    
+    - name: Upload vLLM wheel as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vllm-${{ inputs.vllm_version || '0.10.0' }}-cu121-${{ matrix.gpu_type }}
+        path: output/vllm-*.whl
+        retention-days: 30
+    
+    - name: Generate wheel info
+      run: |
+        # 生成wheel信息文件
+        cat > output/vllm-${{ inputs.vllm_version || '0.10.0' }}-info.txt << EOF
+        vLLM Build Information
+        ======================
+        Version: ${{ inputs.vllm_version || '0.10.0' }}
+        CUDA Version: 12.1.1
+        Python Version: 3.12
+        GPU Architecture: ${{ matrix.cuda_arch }}
+        Target GPU: ${{ matrix.gpu_type }}
+        Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        Commit SHA: ${{ github.sha }}
+        Runner: ${{ runner.name }}
+        
+        Files:
+        $(ls -la output/vllm-*.whl)
+        
+        Dependencies:
+        - PyTorch (CUDA 12.1)
+        - Transformers
+        - FastAPI
+        - Ray
+        
+        Wheel Details:
+        $(python3 -m pip show $(ls output/vllm-*.whl | head -1) 2>/dev/null || echo "Wheel info not available")
+        EOF
+    
+    - name: Upload build info
+      uses: actions/upload-artifact@v4
+      with:
+        name: vllm-${{ inputs.vllm_version || '0.10.0' }}-buildinfo-${{ matrix.gpu_type }}
+        path: output/vllm-*-info.txt
+        retention-days: 30
+
+  create-release:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    needs: build-vllm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+    
+    - name: Prepare release files
+      run: |
+        mkdir -p release/
+        
+        # 收集所有wheel文件
+        find artifacts/ -name "vllm-*.whl" -exec cp {} release/ \;
+        
+        # 收集构建信息
+        find artifacts/ -name "*-info.txt" -exec cp {} release/ \;
+        
+        # 创建release说明
+        cat > release/RELEASE_NOTES.md << EOF
+        # vLLM ${{ inputs.vllm_version || '0.10.0' }} for CUDA 12.1
+        
+        ## 构建信息
+        - **vLLM版本**: ${{ inputs.vllm_version || '0.10.0' }}
+        - **CUDA版本**: 12.1.1
+        - **Python版本**: 3.12
+        - **支持GPU**: RTX 3090Ti, A100, A800, H20
+        - **构建日期**: $(date -u +"%Y-%m-%d")
+        
+        ## 安装方法
+        
+        \`\`\`bash
+        # 首先安装PyTorch (CUDA 12.1)
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+        
+        # 然后安装vLLM
+        pip install vllm-${{ inputs.vllm_version || '0.10.0' }}*.whl
+        \`\`\`
+        
+        ## 验证安装
+        
+        \`\`\`python
+        import vllm
+        print(f"vLLM version: {vllm.__version__}")
+        
+        # 基本使用示例
+        from vllm import LLM
+        # llm = LLM(model="your-model")
+        \`\`\`
+        
+        ## 使用示例
+        
+        \`\`\`python
+        from vllm import LLM, SamplingParams
+        
+        # 创建LLM实例
+        llm = LLM(model="facebook/opt-125m")
+        
+        # 生成文本
+        prompts = ["Hello, my name is", "The future of AI is"]
+        sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
+        outputs = llm.generate(prompts, sampling_params)
+        
+        for output in outputs:
+            print(f"Generated text: {output.outputs[0].text}")
+        \`\`\`
+        
+        ## 文件说明
+        
+        $(ls -la release/)
+        
+        ## 系统要求
+        
+        - NVIDIA GPU with Compute Capability 8.0+ (A100, A800, RTX 3090Ti, H20)
+        - CUDA 12.1+
+        - Python 3.12
+        - PyTorch with CUDA support
+        EOF
+        
+        echo "Release files prepared:"
+        ls -la release/
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: vllm-${{ inputs.vllm_version || '0.10.0' }}-${{ github.run_number }}
+        name: vLLM ${{ inputs.vllm_version || '0.10.0' }} for CUDA 12.1
+        body_path: release/RELEASE_NOTES.md
+        files: release/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
