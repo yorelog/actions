@@ -41,7 +41,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 
 # 创建并使用虚拟环境安装Python包
 RUN uv venv /opt/venv && \
-    uv pip install \
+    uv pip install --python /opt/venv/bin/python \
     numpy \
     pyyaml \
     setuptools \
