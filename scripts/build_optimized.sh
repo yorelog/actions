@@ -168,7 +168,7 @@ build_vllm_optimized() {
     
     # 安装依赖
     echo "安装vLLM依赖..."
-    uv pip install --system -r requirements.txt
+    uv pip install -r requirements.txt
     
     # 设置vLLM编译环境
     export VLLM_INSTALL_PUNICA_KERNELS=1
