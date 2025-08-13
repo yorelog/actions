@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 设置 uv 路径
-ENV PATH="$HOME/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
 
 # 使用 uv 安装和管理 Python 3.12
 RUN uv python install 3.12 && \
