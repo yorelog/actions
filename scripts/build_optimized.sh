@@ -6,7 +6,7 @@
 set -e
 
 # 确保uv在PATH中
-export PATH="$HOME/.cargo/bin:$PATH"
+export PATH="/root/.local/bin:$PATH"
 
 # 检测GPU型号并设置优化参数
 detect_gpu_and_optimize() {

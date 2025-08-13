@@ -1,0 +1,175 @@
+name: Build PyTorch 2.8.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      pytorch_version:
+        description: 'PyTorch version to build'
+        required: true
+        default: '2.8.0'
+        type: string
+      gpu_architecture:
+        description: 'Target GPU architecture'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - '8.0'  # A100, A800
+          - '8.6'  # RTX 3090Ti
+          - '8.9'  # H20
+          - '8.0;8.6;8.9'  # All supported
+  push:
+    paths:
+      - 'Dockerfile.pytorch'
+      - 'scripts/build_optimized.sh'
+    branches:
+      - main
+
+env:
+  REGISTRY: registry.cn-beijing.aliyuncs.com
+  IMAGE_NAME: yoce/cuda
+  BASE_TAG: cu121-build
+
+jobs:
+  build-pytorch:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.ALIYUN_USERNAME }}
+        password: ${{ secrets.ALIYUN_PASSWORD }}
+    
+    - name: Set PyTorch version and tag
+      run: |
+        PYTORCH_VERSION="${{ github.event.inputs.pytorch_version || '2.8.0' }}"
+        GPU_ARCH="${{ github.event.inputs.gpu_architecture || 'auto' }}"
+        
+        # 生成镜像标签
+        if [[ "$GPU_ARCH" == "auto" ]]; then
+          TAG_SUFFIX=""
+        else
+          TAG_SUFFIX="-$(echo $GPU_ARCH | tr ';' '-')"
+        fi
+        
+        IMAGE_TAG="pytorch-${PYTORCH_VERSION}${TAG_SUFFIX}"
+        
+        echo "PYTORCH_VERSION=$PYTORCH_VERSION" >> $GITHUB_ENV
+        echo "GPU_ARCH=$GPU_ARCH" >> $GITHUB_ENV
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+        echo "FULL_IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG" >> $GITHUB_ENV
+        
+        echo "将构建 PyTorch $PYTORCH_VERSION (GPU架构: $GPU_ARCH)"
+        echo "镜像标签: $IMAGE_TAG"
+    
+    - name: Build PyTorch Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.pytorch
+        push: true
+        tags: ${{ env.FULL_IMAGE_NAME }}
+        build-args: |
+          BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}
+          PYTORCH_VERSION=${{ env.PYTORCH_VERSION }}
+          GPU_ARCHITECTURE=${{ env.GPU_ARCH }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64
+        labels: |
+          org.opencontainers.image.title=PyTorch ${{ env.PYTORCH_VERSION }} CUDA 12.1.1
+          org.opencontainers.image.description=PyTorch ${{ env.PYTORCH_VERSION }} compiled with CUDA 12.1.1
+          org.opencontainers.image.version=${{ env.PYTORCH_VERSION }}
+          org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.source=${{ github.event.repository.html_url }}
+    
+    - name: Test PyTorch installation
+      run: |
+        echo "测试 PyTorch 安装..."
+        docker run --rm --gpus all ${{ env.FULL_IMAGE_NAME }} python3 -c "
+        import torch
+        print(f'PyTorch version: {torch.__version__}')
+        print(f'CUDA available: {torch.cuda.is_available()}')
+        if torch.cuda.is_available():
+            print(f'CUDA version: {torch.version.cuda}')
+            print(f'GPU count: {torch.cuda.device_count()}')
+            for i in range(torch.cuda.device_count()):
+                print(f'GPU {i}: {torch.cuda.get_device_name(i)}')
+        " || echo "GPU测试跳过 (可能无GPU环境)"
+    
+    - name: Extract wheels from container
+      run: |
+        echo "提取编译的 wheel 文件..."
+        mkdir -p ./artifacts
+        
+        # 从容器中复制 wheel 文件
+        CONTAINER_ID=$(docker create ${{ env.FULL_IMAGE_NAME }})
+        docker cp $CONTAINER_ID:/output/ ./artifacts/ || echo "无输出文件"
+        docker rm $CONTAINER_ID
+        
+        # 显示文件
+        find ./artifacts -name "*.whl" -exec ls -lh {} \; || echo "未找到 wheel 文件"
+    
+    - name: Upload PyTorch wheels
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: pytorch-${{ env.PYTORCH_VERSION }}-wheels
+        path: ./artifacts/output/
+        retention-days: 30
+    
+    - name: Create Release
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: pytorch-${{ env.PYTORCH_VERSION }}-${{ github.run_number }}
+        release_name: PyTorch ${{ env.PYTORCH_VERSION }} (CUDA 12.1.1)
+        body: |
+          ## PyTorch ${{ env.PYTORCH_VERSION }} - CUDA 12.1.1 构建
+          
+          **构建信息:**
+          - PyTorch 版本: ${{ env.PYTORCH_VERSION }}
+          - CUDA 版本: 12.1.1
+          - GPU 架构: ${{ env.GPU_ARCH }}
+          - 构建时间: ${{ github.event.head_commit.timestamp }}
+          - 提交: ${{ github.sha }}
+          
+          **支持的 GPU:**
+          - RTX 3090Ti (Compute Capability 8.6)
+          - A100 (Compute Capability 8.0)
+          - A800 (Compute Capability 8.0)
+          - H20 (Compute Capability 8.9)
+          
+          **Docker 镜像:**
+          ```bash
+          docker pull ${{ env.FULL_IMAGE_NAME }}
+          ```
+          
+          **使用方法:**
+          ```bash
+          # 运行 PyTorch 容器
+          docker run --rm --gpus all -it ${{ env.FULL_IMAGE_NAME }} python3
+          ```
+          
+          **安装编译的 wheel:**
+          下载 artifacts 中的 wheel 文件，然后：
+          ```bash
+          pip install torch-*.whl
+          ```
+        draft: false
+        prerelease: false

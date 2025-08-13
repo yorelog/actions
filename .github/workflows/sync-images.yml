@@ -1,0 +1,216 @@
+name: Sync Images to Aliyun Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_image:
+        description: '源镜像 (例如: nvidia/cuda:12.1.1-devel-ubuntu22.04)'
+        required: true
+        type: string
+      target_tag:
+        description: '目标标签 (例如: 12.1.1-devel-ubuntu22.04，留空则使用源镜像标签)'
+        required: false
+        type: string
+      target_namespace:
+        description: '目标命名空间'
+        required: false
+        default: 'yoce/cuda'
+        type: string
+  schedule:
+    # 每周日凌晨2点自动同步常用镜像
+    - cron: '0 2 * * 0'
+
+env:
+  ALIYUN_REGISTRY: registry.cn-beijing.aliyuncs.com
+
+jobs:
+  sync-single-image:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.ALIYUN_REGISTRY }}
+        username: ${{ secrets.ALIYUN_USERNAME }}
+        password: ${{ secrets.ALIYUN_PASSWORD }}
+    
+    - name: Parse image information
+      run: |
+        SOURCE_IMAGE="${{ github.event.inputs.source_image }}"
+        TARGET_NAMESPACE="${{ github.event.inputs.target_namespace || 'yoce/cuda' }}"
+        TARGET_TAG="${{ github.event.inputs.target_tag }}"
+        
+        # 如果没有指定目标标签，从源镜像提取
+        if [[ -z "$TARGET_TAG" ]]; then
+          if [[ "$SOURCE_IMAGE" == *":"* ]]; then
+            TARGET_TAG="${SOURCE_IMAGE##*:}"
+          else
+            TARGET_TAG="latest"
+          fi
+        fi
+        
+        TARGET_IMAGE="${{ env.ALIYUN_REGISTRY }}/${TARGET_NAMESPACE}:${TARGET_TAG}"
+        
+        echo "SOURCE_IMAGE=$SOURCE_IMAGE" >> $GITHUB_ENV
+        echo "TARGET_IMAGE=$TARGET_IMAGE" >> $GITHUB_ENV
+        echo "TARGET_TAG=$TARGET_TAG" >> $GITHUB_ENV
+        
+        echo "🔄 同步镜像:"
+        echo "  源镜像: $SOURCE_IMAGE"
+        echo "  目标镜像: $TARGET_IMAGE"
+    
+    - name: Pull source image
+      run: |
+        echo "📥 拉取源镜像..."
+        docker pull ${{ env.SOURCE_IMAGE }}
+        
+        # 显示镜像信息
+        docker inspect ${{ env.SOURCE_IMAGE }} --format='{{.RepoTags}} {{.Size}}'
+    
+    - name: Tag and push to Aliyun
+      run: |
+        echo "🏷️ 重新标记镜像..."
+        docker tag ${{ env.SOURCE_IMAGE }} ${{ env.TARGET_IMAGE }}
+        
+        echo "📤 推送到阿里云镜像仓库..."
+        docker push ${{ env.TARGET_IMAGE }}
+        
+        echo "✅ 同步完成!"
+        echo "镜像地址: ${{ env.TARGET_IMAGE }}"
+    
+    - name: Verify sync
+      run: |
+        echo "🔍 验证镜像同步..."
+        docker pull ${{ env.TARGET_IMAGE }}
+        
+        # 比较镜像大小和层数
+        SOURCE_SIZE=$(docker inspect ${{ env.SOURCE_IMAGE }} --format='{{.Size}}')
+        TARGET_SIZE=$(docker inspect ${{ env.TARGET_IMAGE }} --format='{{.Size}}')
+        
+        echo "源镜像大小: $SOURCE_SIZE bytes"
+        echo "目标镜像大小: $TARGET_SIZE bytes"
+        
+        if [[ "$SOURCE_SIZE" == "$TARGET_SIZE" ]]; then
+          echo "✅ 镜像大小匹配，同步成功"
+        else
+          echo "⚠️ 镜像大小不匹配，请检查"
+          exit 1
+        fi
+
+  sync-common-images:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        image:
+          # CUDA 基础镜像
+          - source: "nvidia/cuda:12.1.1-devel-ubuntu22.04"
+            target: "12.1.1-devel-ubuntu22.04"
+          - source: "nvidia/cuda:12.1.1-runtime-ubuntu22.04"
+            target: "12.1.1-runtime-ubuntu22.04"
+          - source: "nvidia/cuda:12.1.1-base-ubuntu22.04"
+            target: "12.1.1-base-ubuntu22.04"
+          # Python 基础镜像
+          - source: "python:3.12-slim"
+            target: "python-3.12-slim"
+          - source: "python:3.11-slim"
+            target: "python-3.11-slim"
+          # Ubuntu 基础镜像
+          - source: "ubuntu:22.04"
+            target: "ubuntu-22.04"
+          - source: "ubuntu:20.04"
+            target: "ubuntu-20.04"
+      fail-fast: false
+    
+    steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.ALIYUN_REGISTRY }}
+        username: ${{ secrets.ALIYUN_USERNAME }}
+        password: ${{ secrets.ALIYUN_PASSWORD }}
+    
+    - name: Sync ${{ matrix.image.source }}
+      run: |
+        SOURCE_IMAGE="${{ matrix.image.source }}"
+        TARGET_IMAGE="${{ env.ALIYUN_REGISTRY }}/yoce/cuda:${{ matrix.image.target }}"
+        
+        echo "🔄 同步镜像: $SOURCE_IMAGE -> $TARGET_IMAGE"
+        
+        # 拉取源镜像
+        docker pull $SOURCE_IMAGE
+        
+        # 重新标记
+        docker tag $SOURCE_IMAGE $TARGET_IMAGE
+        
+        # 推送到阿里云
+        docker push $TARGET_IMAGE
+        
+        echo "✅ $SOURCE_IMAGE 同步完成"
+    
+    - name: Clean up local images
+      if: always()
+      run: |
+        echo "🧹 清理本地镜像..."
+        docker image prune -f
+        docker system df
+
+  list-synced-images:
+    needs: [sync-single-image, sync-common-images]
+    if: always() && (needs.sync-single-image.result == 'success' || needs.sync-common-images.result == 'success')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Log in to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.ALIYUN_REGISTRY }}
+        username: ${{ secrets.ALIYUN_USERNAME }}
+        password: ${{ secrets.ALIYUN_PASSWORD }}
+    
+    - name: List available images
+      run: |
+        echo "📋 阿里云镜像仓库中的可用镜像:"
+        echo "=================================="
+        
+        # 尝试列出一些常见的镜像标签
+        COMMON_TAGS=(
+          "12.1.1-devel-ubuntu22.04"
+          "12.1.1-runtime-ubuntu22.04"
+          "12.1.1-base-ubuntu22.04"
+          "python-3.12-slim"
+          "python-3.11-slim"
+          "ubuntu-22.04"
+          "ubuntu-20.04"
+          "cu121-build"
+          "cu121-build-prod"
+        )
+        
+        for tag in "${COMMON_TAGS[@]}"; do
+          IMAGE="${{ env.ALIYUN_REGISTRY }}/yoce/cuda:$tag"
+          if docker manifest inspect $IMAGE > /dev/null 2>&1; then
+            SIZE=$(docker manifest inspect $IMAGE | jq -r '.config.size // 0')
+            echo "✅ $IMAGE (Size: $SIZE bytes)"
+          else
+            echo "❌ $IMAGE (不存在)"
+          fi
+        done
+        
+        echo ""
+        echo "🔧 使用方法:"
+        echo "docker pull ${{ env.ALIYUN_REGISTRY }}/yoce/cuda:<tag>"
