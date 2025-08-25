@@ -202,7 +202,7 @@ jobs:
         )
         
         for tag in "${COMMON_TAGS[@]}"; do
-          IMAGE="${{ env.ALIYUN_REGISTRY }}/yoce/cuda:$tag"
+          IMAGE="${{ env.ALIYUN_REGISTRY }}/${{ github.event.inputs.target_namespace || 'yoce/cuda' }}:$tag"
           if docker manifest inspect $IMAGE > /dev/null 2>&1; then
             SIZE=$(docker manifest inspect $IMAGE | jq -r '.config.size // 0')
             echo "✅ $IMAGE (Size: $SIZE bytes)"
