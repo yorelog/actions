@@ -41,51 +41,46 @@ jobs:
       packages: write
     
     steps:
-    - name: Aggressive disk space cleanup
+    - name: Smart disk space cleanup
       run: |
-        echo "🧹 激进磁盘空间清理..."
+        echo "🧹 智能磁盘空间清理..."
         
         # 记录清理前磁盘使用
         echo "清理前磁盘使用:"
         df -h /
-        DISK_BEFORE=$(df / | tail -1 | awk '{print $3}')
+        DISK_BEFORE=$(df / | tail -1 | awk '{print $4}')
         
-        # 移除大型不需要的软件和工具
-        echo "🗑️ 移除大型软件包..."
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /usr/local/share/powershell
-        sudo rm -rf /usr/share/swift
-        sudo rm -rf /opt/az
-        sudo rm -rf /usr/local/lib/node_modules
-        sudo rm -rf /usr/local/share/chromium
-        sudo rm -rf /usr/local/graalvm
-        sudo rm -rf /usr/local/sqlpackage
+        # 清理Docker系统缓存，保留24小时内的缓存
+        echo "� 清理Docker旧缓存..."
+        docker system prune -f --filter "until=24h" || true
+        docker builder prune -f --filter "until=24h" || true
         
         # 清理包管理器缓存
+        echo "📦 清理包管理器缓存..."
         sudo apt-get clean
-        sudo apt-get autoremove -y --purge
-        sudo rm -rf /var/lib/apt/lists/*
-        sudo rm -rf /tmp/*
-        sudo rm -rf /var/tmp/*
+        sudo apt-get autoremove -y
         
-        # 清理系统日志
-        sudo journalctl --vacuum-size=50M
+        # 清理系统临时文件
+        echo "🗑️ 清理临时文件..."
+        sudo rm -rf /tmp/* /var/tmp/* || true
         
-        # 清理Docker系统
-        docker system prune -af --volumes || true
-        docker builder prune -af || true
+        # 清理系统日志（保留最近1天）
+        sudo journalctl --vacuum-time=1d || true
+        
+        # 只在空间紧张时进行激进清理
+        DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        if [ "$DISK_USAGE" -gt 80 ]; then
+          echo "⚠️ 磁盘使用率${DISK_USAGE}%，执行激进清理..."
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/powershell || true
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+        fi
         
         # 记录清理后磁盘使用
         echo "清理后磁盘使用:"
         df -h /
-        DISK_AFTER=$(df / | tail -1 | awk '{print $3}')
+        DISK_AFTER=$(df / | tail -1 | awk '{print $4}')
         
-        # 计算释放的空间
-        FREED=$((DISK_BEFORE - DISK_AFTER))
-        echo "✅ 释放磁盘空间: ${FREED}KB"
+        echo "✅ 磁盘清理完成"
     
     - name: Checkout vLLM repository
       uses: actions/checkout@v4
