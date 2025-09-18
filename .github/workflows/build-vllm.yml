@@ -81,6 +81,18 @@ jobs:
         df -h /
         DISK_BEFORE=$(df / | tail -1 | awk '{print $4}')
         
+        # 清理日志中发现的大型组件（总计约4GB+）
+        echo "🗑️ 清理大型不必要组件..."
+        sudo rm -rf /usr/share/swift || true         # 释放2.8G
+        sudo rm -rf /usr/share/miniconda || true     # 释放748M  
+        sudo rm -rf /usr/share/az_* || true          # 释放496M+
+        sudo rm -rf /usr/share/gradle-* || true      # 释放143M
+        
+        # 清理其他常见大型组件
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/share/powershell || true
+        
         # 清理Docker系统缓存，保留24小时内的缓存
         echo "� 清理Docker旧缓存..."
         docker system prune -f --filter "until=24h" || true
@@ -196,31 +208,61 @@ jobs:
       run: |
         echo "🚀 开始构建vLLM Docker镜像..."
         
-        # 检查可用空间并设置最佳构建目录
+        # 检查可用空间并利用最大分区
         echo "构建前可用空间:"
-        df -h / /tmp
+        df -h / /mnt /tmp
         
-        # 设置Docker构建上下文到/tmp以利用更大空间
-        export DOCKER_TMPDIR=/tmp
-        export TMPDIR=/tmp
+        # 利用/mnt的66G大空间进行构建
+        echo "🚀 使用/mnt分区(66G可用)作为构建空间"
+        export DOCKER_TMPDIR=/mnt
+        export TMPDIR=/mnt
+        mkdir -p /mnt/docker-build
+        
+        # 创建符号链接，让Docker使用/mnt空间
+        sudo mkdir -p /mnt/docker
+        sudo systemctl stop docker || true
+        sudo rm -rf /var/lib/docker/tmp || true
+        sudo ln -sf /mnt/docker /var/lib/docker/tmp || true
+        sudo systemctl start docker || true
         
         # 基础构建参数
         BUILD_ARGS=""
         BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg PYTHON_VERSION=$PYTHON_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg torch_cuda_arch_list=\"$TORCH_CUDA_ARCH_LIST\""
-        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04"
         BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         
-        echo "🔍 构建参数检查:"
+        echo "🔍 构建参数详细检查:"
         echo "BUILD_ARGS: $BUILD_ARGS"
         echo "TARGET_IMAGE: $TARGET_IMAGE"
+        echo "PWD: $(pwd)"
+        echo "DOCKER_TMPDIR: $DOCKER_TMPDIR"
+        echo "TMPDIR: $TMPDIR"
+        echo ""
+        
         echo "当前目录内容:"
         ls -la
+        echo ""
+        
+        echo "Dockerfile存在检查:"
+        ls -la docker/Dockerfile 2>/dev/null || echo "❌ Dockerfile not found!"
+        echo ""
+        
+        echo "Docker buildx版本:"
+        docker buildx version
+        echo ""
         
         # 执行构建
         echo "🔨 执行Docker构建..."
-        docker build \
+        
+        # 构建前再次检查磁盘空间
+        echo "构建开始前磁盘状态:"
+        df -h / /tmp
+        docker system df
+        
+        # 使用buildx构建以支持缓存和多平台
+        docker buildx build \
             $BUILD_ARGS \
             --target vllm-openai \
             --tag "$TARGET_IMAGE" \
@@ -233,13 +275,36 @@ jobs:
     
     - name: Check disk space after build
       run: |
-        echo "📊 构建后磁盘空间:"
-        df -h /
+        echo "📊 构建后详细磁盘空间分析:"
+        echo "=== 总体磁盘使用变化 ==="
+        df -h / /mnt /tmp
         echo ""
-        echo "Docker空间使用:"
-        docker system df
         
-        # 检查磁盘使用率
+        echo "=== Docker空间使用详情 ==="
+        docker system df
+        echo ""
+        
+        echo "=== 大型目录当前状态 ==="
+        du -sh /var/lib/docker /mnt /tmp 2>/dev/null || true
+        echo ""
+        
+        echo "=== 构建产生的文件 ==="
+        find /mnt -name "*docker*" -type d 2>/dev/null | head -5 || true
+        echo ""
+        
+        # 检查磁盘使用率并给出建议
+        ROOT_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        MNT_USAGE=$(df /mnt | tail -1 | awk '{print $5}' | sed 's/%//')
+        
+        echo "=== 磁盘使用率分析 ==="
+        echo "根分区使用率: ${ROOT_USAGE}%"
+        echo "/mnt分区使用率: ${MNT_USAGE}%"
+        
+        if [ "$ROOT_USAGE" -gt 85 ]; then
+          echo "⚠️ 根分区使用率过高，执行紧急清理..."
+          docker system prune -f
+          docker image prune -af --filter "until=1h"
+        fi
         DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
         if [ "$DISK_USAGE" -gt 85 ]; then
           echo "⚠️ 磁盘使用率超过85%，执行紧急清理..."
