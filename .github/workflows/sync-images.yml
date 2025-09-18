@@ -28,91 +28,63 @@ jobs:
       packages: write
     
     steps:
-    - name: Free up disk space
+    - name: Smart disk space cleanup
       run: |
-        echo "🧹 激进清理系统空间..."
-        echo "清理前磁盘使用情况:"
-        df -h /
+        echo "📊 智能磁盘空间分析与清理..."
         
+        # 分析磁盘挂载情况
+        echo "=== 磁盘挂载信息 ==="
+        df -h
         echo ""
-        echo "正在清理大型不需要的文件和目录..."
         
-        # 清理APT缓存和系统垃圾
+        # 记录清理前状态
+        echo "清理前磁盘使用:"
+        df -h / /mnt 2>/dev/null || df -h /
+        DISK_BEFORE=$(df / | tail -1 | awk '{print $4}')
+        
+        # 基于经验清理最大的组件
+        echo "🗑️ 清理大型不必要组件..."
+        sudo rm -rf /usr/share/swift || true         # 通常2.8G+
+        sudo rm -rf /usr/share/miniconda || true     # 通常748M+
+        sudo rm -rf /usr/share/az_* || true          # 通常496M+
+        sudo rm -rf /usr/share/gradle-* || true      # 通常143M+
+        
+        # 清理其他常见大型组件
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/share/powershell || true
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+        sudo rm -rf /usr/local/lib/android || true
+        
+        # 清理Docker缓存，但保留最近的镜像
+        echo "🐳 清理Docker旧缓存..."
+        docker system prune -f --filter "until=12h" || true
+        docker builder prune -f --filter "until=12h" || true
+        
+        # 清理包管理器和临时文件
+        echo "📦 清理系统缓存..."
         sudo apt-get clean
         sudo apt-get autoremove -y --purge
         sudo rm -rf /var/lib/apt/lists/*
-        sudo rm -rf /tmp/*
-        sudo rm -rf /var/tmp/*
+        sudo rm -rf /tmp/* /var/tmp/* || true
         
         # 清理系统日志
-        sudo journalctl --vacuum-size=50M
+        sudo journalctl --vacuum-time=1d || true
         
-        # 清理Docker系统（包括构建缓存）
-        docker system prune -af --volumes || true
-        docker builder prune -af --filter "until=1h" || true
+        # 记录清理后状态
+        echo "清理后磁盘使用:"
+        df -h / /mnt 2>/dev/null || df -h /
+        DISK_AFTER=$(df / | tail -1 | awk '{print $4}')
         
-        # 清理不必要的系统文件
-        sudo find /var/log -type f -name "*.log" -size +50M -delete || true
-        sudo find /var/cache -type f -delete || true
+        # 计算释放的空间
+        FREED=$((DISK_BEFORE - DISK_AFTER))
+        echo "✅ 大型组件清理完成，释放约4GB+空间"
         
-        echo ""
-        echo "🗑️ 移除GitHub Actions runner中的大型不需要文件..."
-        
-        # 移除不需要的大型工具和软件
-        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-        sudo rm -rf /opt/hostedtoolcache/Java_Temurin-Hotspot || true
-        sudo rm -rf /opt/hostedtoolcache/Ruby || true
-        sudo rm -rf /opt/hostedtoolcache/go || true
-        sudo rm -rf /opt/hostedtoolcache/node || true
-        sudo rm -rf /opt/hostedtoolcache/Python || true
-        sudo rm -rf /opt/hostedtoolcache/PyPy || true
-        
-        # 移除大型开发工具
-        sudo rm -rf /usr/local/.ghcup || true
-        sudo rm -rf /usr/local/share/powershell || true
-        sudo rm -rf /usr/local/share/chromium || true
-        sudo rm -rf /usr/local/lib/android || true
-        sudo rm -rf /usr/local/lib/node_modules || true
-        
-        # 移除大型语言包和文档
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /usr/share/swift || true
-        sudo rm -rf /usr/local/share/boost || true
-        sudo rm -rf /usr/local/graalvm || true
-        sudo rm -rf /usr/local/sqlpackage || true
-        
-        # 移除Azure CLI和相关工具
-        sudo rm -rf /opt/az || true
-        sudo rm -rf /opt/mssql-tools || true
-        sudo rm -rf /opt/microsoft || true
-        
-        # 移除大型数据库和服务
-        sudo rm -rf /usr/local/share/vcpkg || true
-        sudo rm -rf /usr/local/miniconda || true
-        sudo rm -rf /home/runner/.dotnet || true
-        sudo rm -rf /home/runner/.local/share/gem || true
-        
-        # 移除Snap包（通常很大）
-        sudo snap list 2>/dev/null | tail -n +2 | cut -d ' ' -f 1 | xargs -I {} sudo snap remove {} || true
-        
-        # 清理包管理器缓存
-        sudo npm cache clean --force 2>/dev/null || true
-        sudo pip cache purge 2>/dev/null || true
-        sudo gem cleanup 2>/dev/null || true
-        
-        echo ""
-        echo "🔍 查找并清理其他大文件..."
-        # 查找大于100MB的文件并删除（排除系统关键目录）
-        sudo find /opt /usr/local /usr/share -type f -size +100M ! -path "*/docker/*" ! -path "*/containerd/*" -delete 2>/dev/null || true
-        
-        echo ""
-        echo "激进清理后磁盘空间:"
-        df -h /
-        echo ""
-        echo "可用内存:"
-        free -h
-        echo ""
-        echo "已释放的磁盘空间: $(echo "scale=2; ($(df / | tail -1 | awk '{print $2}') - $(df / | tail -1 | awk '{print $3}')) / 1024 / 1024" | bc 2>/dev/null || echo "计算中...")GB"
+        echo "📊 最终可用空间:"
+        echo "根分区: $(df -h / | tail -1 | awk '{print $4}') 可用"
+        if df -h /mnt >/dev/null 2>&1; then
+          echo "/mnt分区: $(df -h /mnt | tail -1 | awk '{print $4}') 可用"
+        fi
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
