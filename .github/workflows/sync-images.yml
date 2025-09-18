@@ -30,18 +30,31 @@ jobs:
     steps:
     - name: Free up disk space
       run: |
-        echo "🧹 清理系统空间..."
+        echo "🧹 深度清理系统空间..."
+        
         # 清理APT缓存和系统垃圾
         sudo apt-get clean
-        sudo apt-get autoremove -y
+        sudo apt-get autoremove -y --purge
         sudo rm -rf /var/lib/apt/lists/*
+        sudo rm -rf /tmp/*
+        sudo rm -rf /var/tmp/*
         
-        # 清理Docker系统
+        # 清理系统日志
+        sudo journalctl --vacuum-size=50M
+        
+        # 清理Docker系统（包括构建缓存）
         docker system prune -af --volumes || true
+        docker builder prune -af --filter "until=1h" || true
         
-        # 显示可用空间
-        echo "清理后磁盘空间:"
-        df -h
+        # 清理不必要的系统文件
+        sudo find /var/log -type f -name "*.log" -size +50M -delete || true
+        sudo find /var/cache -type f -delete || true
+        
+        echo "深度清理后磁盘空间:"
+        df -h /
+        echo ""
+        echo "可用内存:"
+        free -h
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -90,10 +103,20 @@ jobs:
     - name: Sync image to Aliyun Registry
       run: |
         echo "📥 拉取源镜像..."
+        # 设置Docker的并发拉取
+        export DOCKER_BUILDKIT=1
         docker pull "$SOURCE_IMAGE"
         
         echo "📊 拉取后磁盘空间:"
         df -h /
+        
+        # 检查是否需要清理空间
+        DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        if [ "$DISK_USAGE" -gt 80 ]; then
+          echo "⚠️ 磁盘使用率超过80%，执行紧急清理..."
+          docker system prune -f
+          sudo rm -rf /tmp/* /var/tmp/* || true
+        fi
         
         echo "🏷️ 标记镜像..."
         docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
@@ -114,6 +137,10 @@ jobs:
         # 清理未使用的镜像和容器
         docker system prune -f
         
+        # 额外的空间清理
+        docker volume prune -f || true
+        docker network prune -f || true
+        
         echo "🔍 验证镜像可用性..."
         # 使用manifest inspect验证镜像存在，避免重新下载
         if docker manifest inspect "$TARGET_IMAGE" > /dev/null 2>&1; then
@@ -124,8 +151,15 @@ jobs:
           exit 1
         fi
         
-        echo "📊 最终磁盘空间:"
+        echo "📊 最终状态报告:"
+        echo "================="
+        echo "磁盘空间:"
         df -h /
         echo ""
-        echo "Docker最终空间使用:"
+        echo "Docker空间使用:"
         docker system df
+        echo ""
+        echo "内存使用:"
+        free -h
+        echo ""
+        echo "同步完成时间: $(date)"
