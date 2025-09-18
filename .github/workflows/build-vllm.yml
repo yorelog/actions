@@ -223,7 +223,33 @@ jobs:
       run: |
         echo "🚀 开始构建vLLM Docker镜像..."
         
+        # 检查当前工作目录，应该在vLLM仓库中
+        echo "当前工作目录: $(pwd)"
+        if [ ! -f "docker/Dockerfile" ]; then
+          echo "❌ 错误：不在vLLM仓库目录中或Dockerfile不存在！"
+          echo "目录内容："
+          ls -la
+          exit 1
+        fi
         
+        # 检查可用空间并优化构建环境
+        echo "构建前可用空间:"
+        df -h / /mnt /tmp
+        
+        # 利用/mnt的66G大空间进行构建
+        echo "🚀 配置使用/mnt分区(66G可用)作为构建空间"
+        export DOCKER_TMPDIR=/mnt
+        export TMPDIR=/mnt
+        
+        # 使用sudo创建构建目录
+        sudo mkdir -p /mnt/docker-build
+        sudo chmod 777 /mnt/docker-build
+        
+        # 设置Docker使用/mnt空间，但简化配置避免服务重启
+        sudo mkdir -p /mnt/docker-tmp
+        sudo chmod 777 /mnt/docker-tmp
+        
+        echo "✅ 构建环境配置完成，Docker将使用/mnt分区空间"
         # 基础构建参数
         BUILD_ARGS=""
         BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
