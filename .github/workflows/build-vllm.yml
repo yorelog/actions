@@ -41,6 +41,37 @@ jobs:
       packages: write
     
     steps:
+    - name: Analyze disk usage and mounts
+      run: |
+        echo "📊 GitHub Actions环境磁盘分析..."
+        
+        echo "=== 磁盘挂载信息 ==="
+        df -h
+        echo ""
+        
+        echo "=== 块设备信息 ==="
+        lsblk
+        echo ""
+        
+        echo "=== /mnt目录内容 ==="
+        ls -la /mnt/ 2>/dev/null || echo "No /mnt directory"
+        echo ""
+        
+        echo "=== 临时目录大小 ==="
+        du -sh /tmp /var/tmp 2>/dev/null || true
+        echo ""
+        
+        echo "=== Docker根目录 ==="
+        docker info 2>/dev/null | grep "Docker Root Dir" || echo "Docker not running"
+        echo ""
+        
+        echo "=== 最大的目录 ==="
+        du -sh /* 2>/dev/null | sort -hr | head -10
+        echo ""
+        
+        echo "=== /tmp磁盘空间详情 ==="
+        df -h /tmp
+        
     - name: Smart disk space cleanup
       run: |
         echo "🧹 智能磁盘空间清理..."
@@ -139,15 +170,39 @@ jobs:
     
     - name: Check disk space before build
       run: |
-        echo "📊 构建前磁盘空间:"
-        df -h /
+        echo "📊 构建前详细磁盘空间分析:"
+        echo "=== 总体磁盘使用 ==="
+        df -h
         echo ""
-        echo "Docker空间使用:"
+        
+        echo "=== /tmp目录详情 ==="
+        df -h /tmp
+        du -sh /tmp/* 2>/dev/null | sort -hr | head -5 || echo "No files in /tmp"
+        echo ""
+        
+        echo "=== Docker空间使用 ==="
         docker system df
+        echo ""
+        
+        echo "=== 大文件目录分析 ==="
+        du -sh /usr/share/* 2>/dev/null | sort -hr | head -5
+        echo ""
+        
+        echo "=== 可用空间总结 ==="
+        echo "根分区: $(df -h / | tail -1 | awk '{print $4}') 可用"
+        echo "/tmp分区: $(df -h /tmp | tail -1 | awk '{print $4}') 可用"
     
     - name: Build vLLM Docker image
       run: |
         echo "🚀 开始构建vLLM Docker镜像..."
+        
+        # 检查可用空间并设置最佳构建目录
+        echo "构建前可用空间:"
+        df -h / /tmp
+        
+        # 设置Docker构建上下文到/tmp以利用更大空间
+        export DOCKER_TMPDIR=/tmp
+        export TMPDIR=/tmp
         
         # 基础构建参数
         BUILD_ARGS=""
