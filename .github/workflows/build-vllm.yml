@@ -136,8 +136,10 @@ jobs:
         echo "  vLLM版本: $VLLM_VERSION"
         echo "  清理后版本: $CLEAN_VERSION"
         echo "  CUDA版本: $CUDA_VERSION"
-        echo "  CUDA基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        echo "  构建基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04"
+        echo "  运行基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         echo "  Python版本: $PYTHON_VERSION"
+        echo "  CUDA架构列表: $TORCH_CUDA_ARCH_LIST"
         echo "  目标镜像: $TARGET_IMAGE"
     
     - name: Check disk space before build
@@ -154,11 +156,11 @@ jobs:
         
         # 基础构建参数
         BUILD_ARGS=""
-        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
-        BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg PYTHON_VERSION=$PYTHON_VERSION"
-        BUILD_ARGS="$BUILD_ARGS --build-arg TORCH_CUDA_ARCH_LIST=\"$TORCH_CUDA_ARCH_LIST\""
+        BUILD_ARGS="$BUILD_ARGS --build-arg torch_cuda_arch_list=\"$TORCH_CUDA_ARCH_LIST\""
+        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         
         echo "🔍 构建参数检查:"
         echo "BUILD_ARGS: $BUILD_ARGS"
@@ -168,7 +170,7 @@ jobs:
         
         # 执行构建
         echo "🔨 执行Docker构建..."
-        docker buildx build \
+        docker build \
             $BUILD_ARGS \
             --target vllm-openai \
             --tag "$TARGET_IMAGE" \
