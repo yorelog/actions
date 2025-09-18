@@ -126,40 +126,66 @@ jobs:
         
         echo "✅ 同步完成!"
         echo "镜像地址: $TARGET_IMAGE"
+  
     
-    - name: Clean up and verify
+    - name: List available remote tags
       run: |
-        echo "🧹 清理本地镜像..."
-        # 删除本地镜像以释放空间
-        docker rmi "$SOURCE_IMAGE" || true
-        docker rmi "$TARGET_IMAGE" || true
+        echo "🏷️ 查询远程镜像可用标签..."
+        echo "================================"
         
-        # 清理未使用的镜像和容器
-        docker system prune -f
+        # 提取镜像名称（去除tag部分）
+        SOURCE_REPO="${SOURCE_IMAGE%%:*}"
+        TARGET_REPO="${TARGET_IMAGE%%:*}"
         
-        # 额外的空间清理
-        docker volume prune -f || true
-        docker network prune -f || true
+        echo "📋 源镜像仓库可用标签 ($SOURCE_REPO):"
+        echo "-----------------------------------"
         
-        echo "🔍 验证镜像可用性..."
-        # 使用manifest inspect验证镜像存在，避免重新下载
-        if docker manifest inspect "$TARGET_IMAGE" > /dev/null 2>&1; then
-          echo "✅ 镜像同步成功，可以正常拉取"
-          echo "镜像信息验证通过"
+        # 尝试获取源镜像的tags（限制显示数量避免输出过多）
+
+        # 使用Docker Registry API v2获取tags
+        REPO_NAME=$(echo "$SOURCE_REPO" | cut -d'/' -f2-)
+        REGISTRY_URL="https://registry-1.docker.io"
+        
+        # 获取认证token
+        TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$SOURCE_REPO:pull" | jq -r '.token' 2>/dev/null)
+        
+        if [[ "$TOKEN" != "null" && -n "$TOKEN" ]]; then
+          echo "获取最新的20个标签:"
+          curl -s -H "Authorization: Bearer $TOKEN" \
+            "$REGISTRY_URL/v2/$SOURCE_REPO/tags/list" | \
+            jq -r '.tags[]?' 2>/dev/null | head -20 || echo "无法解析标签列表"
         else
-          echo "❌ 镜像验证失败"
-          exit 1
+          echo "⚠️ 无法获取Docker Hub认证token，跳过源镜像标签查询"
         fi
         
-        echo "📊 最终状态报告:"
-        echo "================="
-        echo "磁盘空间:"
-        df -h /
+        
         echo ""
-        echo "Docker空间使用:"
-        docker system df
+        echo "📋 阿里云镜像仓库当前标签 ($TARGET_REPO):"
+        echo "----------------------------------------"
+        
+        # 获取阿里云镜像仓库的标签
+        NAMESPACE=$(echo "$TARGET_REPO" | sed "s|${{ env.ALIYUN_REGISTRY }}/||" | cut -d'/' -f1)
+        REPO_NAME=$(echo "$TARGET_REPO" | sed "s|${{ env.ALIYUN_REGISTRY }}/$NAMESPACE/||")
+        
+        # 使用阿里云镜像服务API获取标签列表
+        echo "正在查询命名空间: $NAMESPACE"
+        echo "镜像仓库名称: $REPO_NAME"
+        echo "当前同步的标签: $TARGET_TAG"
+        
+        # 尝试使用docker命令查询现有标签
         echo ""
-        echo "内存使用:"
-        free -h
+        echo "🔍 验证当前标签可用性:"
+        if docker manifest inspect "$TARGET_IMAGE" > /dev/null 2>&1; then
+          echo "✅ $TARGET_TAG - 刚刚同步成功"
+        else
+          echo "❌ $TARGET_TAG - 验证失败"
+        fi
+        
         echo ""
-        echo "同步完成时间: $(date)"
+        echo "💡 使用建议:"
+        echo "============"
+        echo "拉取刚同步的镜像:"
+        echo "docker pull $TARGET_IMAGE"
+        echo ""
+        echo "查看更多标签请访问:"
+        echo "https://cr.console.aliyun.com/repository/cn-beijing/$NAMESPACE/$REPO_NAME/images"
