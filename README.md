@@ -1,4 +1,43 @@
-# Personal GitHub Actions Collection
+# Pe## 📂 当前工作流
+
+### 🐳 Docker镜像同步 (`sync-images.yml`)
+将Docker镜像从Docker Hub等源仓库同步到阿里云容器镜像服务，解决国内访问速度慢的问题。
+
+#### 特性
+- 🚀 **一键同步**：手动触发任意Docker镜像同步
+- 💾 **磁盘优化**：智能清理系统空间，避免磁盘空间不足
+- 🏷️ **灵活标记**：支持自定义目标标签和命名空间
+- 🔍 **自动验证**：同步完成后自动验证镜像可用性
+- 📊 **标签查询**：显示源镜像和目标镜像的可用标签
+
+### 🚀 vLLM Docker镜像构建 (`build-vllm.yml`)
+基于CUDA 12.4.1构建vLLM Docker镜像，支持选择GitHub release版本。
+
+#### 特性
+- 🔧 **版本选择**：支持选择vLLM的GitHub release版本
+- 🇨🇳 **中国优化**：使用清华大学镜像源和Gitee仓库
+- 💾 **激进清理**：释放5-15GB磁盘空间用于大型构建
+- 🏗️ **智能构建**：预下载依赖，优化构建过程
+- 🧪 **自动测试**：构建完成后自动测试镜像可用性
+
+#### 构建参数
+| 参数 | 描述 | 默认值 | 示例 |
+|------|------|--------|------|
+| vllm_version | vLLM版本 | v0.10.2 | v0.10.2 |
+| cuda_version | CUDA版本 | 12.4 | 12.4 |
+| python_version | Python版本 | 3.12 | 3.12 |
+| torch_cuda_arch_list | CUDA架构列表 | 8.0 8.6 8.9 | 8.0 8.6 8.9 |
+| target_namespace | 目标命名空间 | yoce | yoce |
+
+#### 使用示例
+```bash
+# 构建结果示例
+输入: vllm_version=v0.10.2, cuda_version=12.4
+输出: registry.cn-beijing.aliyuncs.com/yoce/vllm:v0.10.2_cu124
+
+# 使用构建的镜像
+docker pull registry.cn-beijing.aliyuncs.com/yoce/vllm:v0.10.2_cu124
+```ub Actions Collection
 
 �️ 个人定制的GitHub Actions工作流集合，用于自动化各种开发和运维任务。
 
@@ -46,6 +85,7 @@
 
 ## 🔮 计划添加的工作流
 
+- **🤖 AI模型镜像构建**：其他AI框架（PyTorch、TensorFlow）的Docker镜像构建
 - **🚀 自动部署工作流**：部署应用到各种云平台
 - **📦 依赖更新工作流**：自动检查和更新项目依赖
 - **🔍 代码质量检查**：自动化代码检查和测试

@@ -1,0 +1,243 @@
+name: Build vLLM Docker Image Based on Cuda 12.4
+
+on:
+  workflow_dispatch:
+    inputs:
+      vllm_version:
+        description: 'vLLM版本 (例如: v0.10.2)'
+        required: true
+        type: string
+        default: 'releases/v0.10.2'
+      cuda_version:
+        description: 'CUDA版本'
+        required: false
+        type: string
+        default: '12.4'
+      python_version:
+        description: 'Python版本'
+        required: false
+        type: string
+        default: '3.12'
+      torch_cuda_arch_list:
+        description: 'Torch CUDA架构列表'
+        required: false
+        type: string
+        default: '8.0 8.6 8.9'
+      target_namespace:
+        description: '目标命名空间'
+        required: false
+        default: 'yoce'
+        type: string
+
+env:
+  ALIYUN_REGISTRY: registry.cn-beijing.aliyuncs.com
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  build-vllm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Aggressive disk space cleanup
+      run: |
+        echo "🧹 激进磁盘空间清理..."
+        
+        # 记录清理前磁盘使用
+        echo "清理前磁盘使用:"
+        df -h /
+        DISK_BEFORE=$(df / | tail -1 | awk '{print $3}')
+        
+        # 移除大型不需要的软件和工具
+        echo "🗑️ 移除大型软件包..."
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo rm -rf /usr/local/share/powershell
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /opt/az
+        sudo rm -rf /usr/local/lib/node_modules
+        sudo rm -rf /usr/local/share/chromium
+        sudo rm -rf /usr/local/graalvm
+        sudo rm -rf /usr/local/sqlpackage
+        
+        # 清理包管理器缓存
+        sudo apt-get clean
+        sudo apt-get autoremove -y --purge
+        sudo rm -rf /var/lib/apt/lists/*
+        sudo rm -rf /tmp/*
+        sudo rm -rf /var/tmp/*
+        
+        # 清理系统日志
+        sudo journalctl --vacuum-size=50M
+        
+        # 清理Docker系统
+        docker system prune -af --volumes || true
+        docker builder prune -af || true
+        
+        # 记录清理后磁盘使用
+        echo "清理后磁盘使用:"
+        df -h /
+        DISK_AFTER=$(df / | tail -1 | awk '{print $3}')
+        
+        # 计算释放的空间
+        FREED=$((DISK_BEFORE - DISK_AFTER))
+        echo "✅ 释放磁盘空间: ${FREED}KB"
+    
+    - name: Checkout vLLM repository
+      uses: actions/checkout@v4
+      with:
+        repository: vllm-project/vllm
+        ref: ${{ inputs.vllm_version }}
+        fetch-depth: 1
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: |
+          network=host
+    
+    - name: Log in to Aliyun Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.ALIYUN_REGISTRY }}
+        username: ${{ secrets.ALIYUN_USERNAME }}
+        password: ${{ secrets.ALIYUN_PASSWORD }}
+    
+    - name: Prepare build environment
+      run: |
+        echo "🔧 准备构建环境..."
+        
+        # 设置构建变量
+        VLLM_VERSION="${{ inputs.vllm_version }}"
+        CUDA_VERSION="${{ inputs.cuda_version }}"
+        PYTHON_VERSION="${{ inputs.python_version }}"
+        TORCH_CUDA_ARCH_LIST="${{ inputs.torch_cuda_arch_list }}"
+        TARGET_NAMESPACE="${{ inputs.target_namespace }}"
+        
+        # 生成镜像标签
+        IMAGE_TAG="${VLLM_VERSION}_cu$(echo ${CUDA_VERSION} | tr -d '.')"
+        TARGET_IMAGE="${{ env.ALIYUN_REGISTRY }}/${TARGET_NAMESPACE}/vllm:${IMAGE_TAG}"
+        
+        # 设置环境变量
+        echo "VLLM_VERSION=$VLLM_VERSION" >> $GITHUB_ENV
+        echo "CUDA_VERSION=$CUDA_VERSION" >> $GITHUB_ENV
+        echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_ENV
+        echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST" >> $GITHUB_ENV
+        echo "TARGET_IMAGE=$TARGET_IMAGE" >> $GITHUB_ENV
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+        
+        echo "📋 构建信息:"
+        echo "  vLLM版本: $VLLM_VERSION"
+        echo "  CUDA版本: $CUDA_VERSION"
+        echo "  Python版本: $PYTHON_VERSION"
+        echo "  目标镜像: $TARGET_IMAGE"
+    
+    - name: Check disk space before build
+      run: |
+        echo "📊 构建前磁盘空间:"
+        df -h /
+        echo ""
+        echo "Docker空间使用:"
+        docker system df
+    
+    - name: Build vLLM Docker image
+      run: |
+        echo "🚀 开始构建vLLM Docker镜像..."
+        
+        # 基础构建参数
+        BUILD_ARGS=""
+        BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
+        BUILD_ARGS="$BUILD_ARGS --build-arg PYTHON_VERSION=$PYTHON_VERSION"
+        BUILD_ARGS="$BUILD_ARGS --build-arg TORCH_CUDA_ARCH_LIST=\"$TORCH_CUDA_ARCH_LIST\""
+        BUILD_ARGS="$BUILD_ARGS --build-arg PYTORCH_CUDA_INDEX_BASE_URL=https://download.pytorch.org/whl"
+        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=${{ env.ALIYUN_REGISTRY }}/yoce/cuda:12.4.1-cudnn-devel-ubuntu22.04"
+        BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=${{ env.ALIYUN_REGISTRY }}/yoce/cuda:12.4.1-cudnn-devel-ubuntu22.04"
+        
+
+        # 执行构建
+        echo "🔨 执行Docker构建..."
+        docker buildx build \
+            $BUILD_ARGS \
+            --target vllm-openai \
+            --tag "$TARGET_IMAGE" \
+            --file docker/Dockerfile \
+            --load \
+            .
+        
+        echo "✅ 构建完成!"
+        echo "镜像: $TARGET_IMAGE"
+    
+    - name: Check disk space after build
+      run: |
+        echo "📊 构建后磁盘空间:"
+        df -h /
+        echo ""
+        echo "Docker空间使用:"
+        docker system df
+        
+        # 检查磁盘使用率
+        DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+        if [ "$DISK_USAGE" -gt 85 ]; then
+          echo "⚠️ 磁盘使用率超过85%，执行紧急清理..."
+          docker system prune -f
+          docker image prune -af --filter "until=1h"
+        fi
+    
+    - name: Test built image
+      run: |
+        echo "🧪 测试构建的镜像..."
+        
+        # 简单的镜像测试
+        echo "检查镜像是否可以正常启动..."
+        docker run --rm "$TARGET_IMAGE" python -c "import vllm; print(f'vLLM version: {vllm.__version__}')" || {
+          echo "❌ 镜像测试失败"
+          exit 1
+        }
+        
+        echo "✅ 镜像测试通过"
+    
+    - name: Push to Aliyun Registry
+      run: |
+        echo "📤 推送镜像到阿里云..."
+        
+        docker push "$TARGET_IMAGE"
+        
+        echo "✅ 推送完成!"
+        echo "镜像地址: $TARGET_IMAGE"
+    
+    - name: Clean up and final report
+      run: |
+        echo "🧹 清理构建文件..."
+        
+        # 删除本地镜像释放空间
+        docker rmi "$TARGET_IMAGE" || true
+        
+        # 清理构建缓存
+        docker system prune -f
+        docker builder prune -f
+        
+        # 删除CUTLASS源码
+        rm -rf cutlass-local || true
+        
+        echo "📊 最终状态报告:"
+        echo "=================="
+        echo "构建信息:"
+        echo "  vLLM版本: $VLLM_VERSION"
+        echo "  CUDA版本: $CUDA_VERSION"
+        echo "  Python版本: $PYTHON_VERSION"
+        echo "  镜像标签: $IMAGE_TAG"
+        echo ""
+        echo "镜像地址:"
+        echo "  $TARGET_IMAGE"
+        echo ""
+        echo "使用方法:"
+        echo "  docker pull $TARGET_IMAGE"
+        echo ""
+        echo "磁盘空间:"
+        df -h /
+        echo ""
+        echo "构建完成时间: $(date)"
