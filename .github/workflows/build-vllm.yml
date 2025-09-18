@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       vllm_version:
-        description: 'vLLM版本 (例如: v0.10.2)'
+        description: 'vLLM版本 (例如: releases/v0.10.2)'
         required: true
         type: string
         default: 'releases/v0.10.2'
@@ -12,7 +12,7 @@ on:
         description: 'CUDA版本'
         required: false
         type: string
-        default: '12.4'
+        default: '12.4.1'
       python_version:
         description: 'Python版本'
         required: false
@@ -118,12 +118,14 @@ jobs:
         TORCH_CUDA_ARCH_LIST="${{ inputs.torch_cuda_arch_list }}"
         TARGET_NAMESPACE="${{ inputs.target_namespace }}"
         
-        # 生成镜像标签
-        IMAGE_TAG="${VLLM_VERSION}_cu$(echo ${CUDA_VERSION} | tr -d '.')"
+        # 清理版本号中的斜杠和前缀，生成合法的镜像标签
+        CLEAN_VERSION=$(echo "$VLLM_VERSION" | sed 's|releases/||g' | sed 's|/|_|g')
+        IMAGE_TAG="${CLEAN_VERSION}_cu$(echo ${CUDA_VERSION} | tr -d '.')"
         TARGET_IMAGE="${{ env.ALIYUN_REGISTRY }}/${TARGET_NAMESPACE}/vllm:${IMAGE_TAG}"
         
         # 设置环境变量
         echo "VLLM_VERSION=$VLLM_VERSION" >> $GITHUB_ENV
+        echo "CLEAN_VERSION=$CLEAN_VERSION" >> $GITHUB_ENV
         echo "CUDA_VERSION=$CUDA_VERSION" >> $GITHUB_ENV
         echo "PYTHON_VERSION=$PYTHON_VERSION" >> $GITHUB_ENV
         echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST" >> $GITHUB_ENV
@@ -132,7 +134,9 @@ jobs:
         
         echo "📋 构建信息:"
         echo "  vLLM版本: $VLLM_VERSION"
+        echo "  清理后版本: $CLEAN_VERSION"
         echo "  CUDA版本: $CUDA_VERSION"
+        echo "  CUDA基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         echo "  Python版本: $PYTHON_VERSION"
         echo "  目标镜像: $TARGET_IMAGE"
     
@@ -150,14 +154,18 @@ jobs:
         
         # 基础构建参数
         BUILD_ARGS=""
+        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg PYTHON_VERSION=$PYTHON_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg TORCH_CUDA_ARCH_LIST=\"$TORCH_CUDA_ARCH_LIST\""
-        BUILD_ARGS="$BUILD_ARGS --build-arg PYTORCH_CUDA_INDEX_BASE_URL=https://download.pytorch.org/whl"
-        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=${{ env.ALIYUN_REGISTRY }}/yoce/cuda:12.4.1-cudnn-devel-ubuntu22.04"
-        BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=${{ env.ALIYUN_REGISTRY }}/yoce/cuda:12.4.1-cudnn-devel-ubuntu22.04"
         
-
+        echo "🔍 构建参数检查:"
+        echo "BUILD_ARGS: $BUILD_ARGS"
+        echo "TARGET_IMAGE: $TARGET_IMAGE"
+        echo "当前目录内容:"
+        ls -la
+        
         # 执行构建
         echo "🔨 执行Docker构建..."
         docker buildx build \
@@ -219,9 +227,6 @@ jobs:
         # 清理构建缓存
         docker system prune -f
         docker builder prune -f
-        
-        # 删除CUTLASS源码
-        rm -rf cutlass-local || true
         
         echo "📊 最终状态报告:"
         echo "=================="
