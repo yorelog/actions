@@ -223,22 +223,6 @@ jobs:
       run: |
         echo "🚀 开始构建vLLM Docker镜像..."
         
-        # 检查可用空间并利用最大分区
-        echo "构建前可用空间:"
-        df -h / /mnt /tmp
-        
-        # 利用/mnt的66G大空间进行构建
-        echo "🚀 使用/mnt分区(66G可用)作为构建空间"
-        export DOCKER_TMPDIR=/mnt
-        export TMPDIR=/mnt
-        mkdir -p /mnt/docker-build
-        
-        # 创建符号链接，让Docker使用/mnt空间
-        sudo mkdir -p /mnt/docker
-        sudo systemctl stop docker || true
-        sudo rm -rf /var/lib/docker/tmp || true
-        sudo ln -sf /mnt/docker /var/lib/docker/tmp || true
-        sudo systemctl start docker || true
         
         # 基础构建参数
         BUILD_ARGS=""
