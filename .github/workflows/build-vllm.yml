@@ -41,9 +41,38 @@ jobs:
       packages: write
     
     steps:
+    - name: Quick cleanup of large components
+      run: |
+        echo "🚀 快速清理已知大型组件..."
+        
+        echo "清理前根分区空间: $(df -h / | tail -1 | awk '{print $4}')"
+        
+        # 基于经验快速清理最大的组件
+        echo "🗑️ 删除Swift工具链 (~2.8G)..."
+        sudo rm -rf /usr/share/swift || true
+        
+        echo "🗑️ 删除Miniconda (~748M)..."
+        sudo rm -rf /usr/share/miniconda || true
+        
+        echo "🗑️ 删除Azure CLI (~496M)..."
+        sudo rm -rf /usr/share/az_* || true
+        
+        echo "🗑️ 删除Gradle (~143M)..."
+        sudo rm -rf /usr/share/gradle-* || true
+        
+        echo "🗑️ 删除其他大型组件..."
+        sudo rm -rf /usr/share/dotnet || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /usr/local/share/powershell || true
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+        sudo rm -rf /usr/local/lib/android || true
+        
+        echo "快速清理后根分区空间: $(df -h / | tail -1 | awk '{print $4}')"
+        echo "✅ 快速清理完成，预计释放约4-5GB空间"
+        
     - name: Analyze disk usage and mounts
       run: |
-        echo "📊 GitHub Actions环境磁盘分析..."
+        echo "📊 清理后磁盘环境分析..."
         
         echo "=== 磁盘挂载信息 ==="
         df -h
@@ -72,58 +101,45 @@ jobs:
         echo "=== /tmp磁盘空间详情 ==="
         df -h /tmp
         
-    - name: Smart disk space cleanup
+    - name: Analyze remaining large components
       run: |
-        echo "🧹 智能磁盘空间清理..."
+        echo "🔍 分析剩余大型组件（用于优化未来清理）..."
         
-        # 记录清理前磁盘使用
-        echo "清理前磁盘使用:"
-        df -h /
-        DISK_BEFORE=$(df / | tail -1 | awk '{print $4}')
+        echo "=== 当前最大的系统目录 ==="
+        echo "分析/usr/share目录："
+        du -sh /usr/share/* 2>/dev/null | sort -hr | head -10
+        echo ""
         
-        # 清理日志中发现的大型组件（总计约4GB+）
-        echo "🗑️ 清理大型不必要组件..."
-        sudo rm -rf /usr/share/swift || true         # 释放2.8G
-        sudo rm -rf /usr/share/miniconda || true     # 释放748M  
-        sudo rm -rf /usr/share/az_* || true          # 释放496M+
-        sudo rm -rf /usr/share/gradle-* || true      # 释放143M
+        echo "分析/opt目录："
+        du -sh /opt/* 2>/dev/null | sort -hr | head -10
+        echo ""
         
-        # 清理其他常见大型组件
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /opt/ghc || true
-        sudo rm -rf /usr/local/share/powershell || true
+        echo "分析/usr/local目录："
+        du -sh /usr/local/* 2>/dev/null | sort -hr | head -10
+        echo ""
         
-        # 清理Docker系统缓存，保留24小时内的缓存
-        echo "� 清理Docker旧缓存..."
-        docker system prune -f --filter "until=24h" || true
-        docker builder prune -f --filter "until=24h" || true
+        echo "=== 查找100MB+的大文件 ==="
+        find /usr -type f -size +100M 2>/dev/null | head -10 || echo "No large files found"
+        echo ""
         
-        # 清理包管理器缓存
-        echo "📦 清理包管理器缓存..."
+        echo "=== 轻量级清理剩余缓存 ==="
         sudo apt-get clean
-        sudo apt-get autoremove -y
-        
-        # 清理系统临时文件
-        echo "🗑️ 清理临时文件..."
+        sudo apt-get autoremove -y --purge
+        sudo rm -rf /var/lib/apt/lists/*
         sudo rm -rf /tmp/* /var/tmp/* || true
-        
-        # 清理系统日志（保留最近1天）
         sudo journalctl --vacuum-time=1d || true
         
-        # 只在空间紧张时进行激进清理
-        DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
-        if [ "$DISK_USAGE" -gt 80 ]; then
-          echo "⚠️ 磁盘使用率${DISK_USAGE}%，执行激进清理..."
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/powershell || true
-          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+        echo "🐳 清理Docker旧缓存(保留6小时内)..."
+        docker system prune -f --filter "until=6h" || true
+        docker builder prune -f --filter "until=6h" || true
+        
+        echo "=== 最终清理效果总结 ==="
+        echo "根分区可用空间: $(df -h / | tail -1 | awk '{print $4}')"
+        if df -h /mnt >/dev/null 2>&1; then
+          echo "/mnt分区可用空间: $(df -h /mnt | tail -1 | awk '{print $4}')"
         fi
         
-        # 记录清理后磁盘使用
-        echo "清理后磁盘使用:"
-        df -h /
-        DISK_AFTER=$(df / | tail -1 | awk '{print $4}')
-        
-        echo "✅ 磁盘清理完成"
+        echo "💡 建议：基于以上分析结果，可以将新发现的大组件添加到快速清理步骤中"
     
     - name: Checkout vLLM repository
       uses: actions/checkout@v4
