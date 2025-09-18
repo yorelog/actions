@@ -174,8 +174,7 @@ jobs:
         echo "  vLLM版本: $VLLM_VERSION"
         echo "  清理后版本: $CLEAN_VERSION"
         echo "  CUDA版本: $CUDA_VERSION"
-        echo "  构建基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04"
-        echo "  运行基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        echo "  基础镜像: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 (统一使用22.04节省空间)"
         echo "  Python版本: $PYTHON_VERSION"
         echo "  CUDA架构列表: $TORCH_CUDA_ARCH_LIST"
         echo "  目标镜像: $TARGET_IMAGE"
@@ -230,7 +229,7 @@ jobs:
         BUILD_ARGS="$BUILD_ARGS --build-arg CUDA_VERSION=$CUDA_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg PYTHON_VERSION=$PYTHON_VERSION"
         BUILD_ARGS="$BUILD_ARGS --build-arg torch_cuda_arch_list=\"$TORCH_CUDA_ARCH_LIST\""
-        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04"
+        BUILD_ARGS="$BUILD_ARGS --build-arg BUILD_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         BUILD_ARGS="$BUILD_ARGS --build-arg FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
         
         echo "🔍 构建参数详细检查:"
@@ -241,12 +240,22 @@ jobs:
         echo "TMPDIR: $TMPDIR"
         echo ""
         
+        echo "验证基础镜像参数:"
+        echo "BUILD_BASE_IMAGE: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04"
+        echo "FINAL_BASE_IMAGE: nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04"
+        echo ""
+        
         echo "当前目录内容:"
         ls -la
         echo ""
         
         echo "Dockerfile存在检查:"
         ls -la docker/Dockerfile 2>/dev/null || echo "❌ Dockerfile not found!"
+        if [ -f docker/Dockerfile ]; then
+          echo "✅ Dockerfile found"
+          echo "Dockerfile前10行:"
+          head -10 docker/Dockerfile
+        fi
         echo ""
         
         echo "Docker buildx版本:"
@@ -261,7 +270,10 @@ jobs:
         df -h / /tmp
         docker system df
         
-        # 使用buildx构建以支持缓存和多平台
+        # 使用buildx构建，确保在vLLM仓库目录中执行
+        echo "当前工作目录: $(pwd)"
+        echo "确认在vLLM仓库中构建..."
+        
         docker buildx build \
             $BUILD_ARGS \
             --target vllm-openai \
