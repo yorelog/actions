@@ -300,8 +300,22 @@ jobs:
         echo "当前工作目录: $(pwd)"
         echo "确认在vLLM仓库中构建..."
         
+        # 详细打印完整构建命令
+        echo "📋 完整构建命令预览:"
+        echo "docker buildx build \\"
+        echo "    $BUILD_ARGS \\"
+        echo "    --target vllm-openai \\"
+        echo "    --tag \"$TARGET_IMAGE\" \\"
+        echo "    --file docker/Dockerfile \\"
+        echo "    --load \\"
+        echo "    ."
+        echo ""
+        
         # 构建命令（避免YAML中反斜杠续行问题）
+        echo "🚀 执行构建命令..."
+        set -x  # 启用命令回显
         docker buildx build $BUILD_ARGS --target vllm-openai --tag "$TARGET_IMAGE" --file docker/Dockerfile --load .
+        set +x  # 关闭命令回显
         
         echo "✅ 构建完成!"
         echo "镜像: $TARGET_IMAGE"
