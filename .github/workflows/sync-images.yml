@@ -30,61 +30,63 @@ jobs:
     steps:
     - name: Smart disk space cleanup
       run: |
-        echo "📊 智能磁盘空间分析与清理..."
-        
-        # 分析磁盘挂载情况
-        echo "=== 磁盘挂载信息 ==="
-        df -h
+        set -euo pipefail
+
+        echo "📊 轻量磁盘空间检测..."
+        df -h /
         echo ""
-        
-        # 记录清理前状态
-        echo "清理前磁盘使用:"
-        df -h / /mnt 2>/dev/null || df -h /
-        DISK_BEFORE=$(df / | tail -1 | awk '{print $4}')
-        
-        # 基于经验清理最大的组件
-        echo "🗑️ 清理大型不必要组件..."
-        sudo rm -rf /usr/share/swift || true         # 通常2.8G+
-        sudo rm -rf /usr/share/miniconda || true     # 通常748M+
-        sudo rm -rf /usr/share/az_* || true          # 通常496M+
-        sudo rm -rf /usr/share/gradle-* || true      # 通常143M+
-        
-        # 清理其他常见大型组件
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /opt/ghc || true
-        sudo rm -rf /usr/local/share/powershell || true
-        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-        sudo rm -rf /usr/local/lib/android || true
-        
-        # 清理Docker缓存，但保留最近的镜像
-        echo "🐳 清理Docker旧缓存..."
-        docker system prune -f --filter "until=12h" || true
-        docker builder prune -f --filter "until=12h" || true
-        
-        # 清理包管理器和临时文件
-        echo "📦 清理系统缓存..."
-        sudo apt-get clean
-        sudo apt-get autoremove -y --purge
-        sudo rm -rf /var/lib/apt/lists/*
-        sudo rm -rf /tmp/* /var/tmp/* || true
-        
-        # 清理系统日志
-        sudo journalctl --vacuum-time=1d || true
-        
-        # 记录清理后状态
-        echo "清理后磁盘使用:"
-        df -h / /mnt 2>/dev/null || df -h /
-        DISK_AFTER=$(df / | tail -1 | awk '{print $4}')
-        
-        # 计算释放的空间
-        FREED=$((DISK_BEFORE - DISK_AFTER))
-        echo "✅ 大型组件清理完成，释放约4GB+空间"
-        
-        echo "📊 最终可用空间:"
-        echo "根分区: $(df -h / | tail -1 | awk '{print $4}') 可用"
-        if df -h /mnt >/dev/null 2>&1; then
-          echo "/mnt分区: $(df -h /mnt | tail -1 | awk '{print $4}') 可用"
+
+        FREE_MB=$(df -m / | tail -1 | awk '{print $4}')
+        THRESHOLD_MB=15360   # 约15GB，可根据需要调整
+
+        if [ "$FREE_MB" -gt "$THRESHOLD_MB" ]; then
+          FREE_GB=$(awk "BEGIN {printf \"%.1f\", $FREE_MB/1024}")
+          echo "✅ 当前根分区可用 ${FREE_GB}GB，超过阈值，跳过清理。"
+          exit 0
         fi
+
+        echo "⚠️ 可用空间不足，执行精简清理..."
+        BEFORE_MB=$FREE_MB
+
+        shopt -s nullglob
+        CANDIDATES=(
+          /usr/share/swift
+          /usr/share/miniconda
+          /usr/share/az_*
+          /usr/share/gradle-*
+          /usr/share/dotnet
+          /opt/ghc
+          /usr/local/share/powershell
+          /opt/hostedtoolcache/CodeQL
+          /usr/local/lib/android
+        )
+
+        for pattern in "${CANDIDATES[@]}"; do
+          for target in $pattern; do
+            if [ -e "$target" ]; then
+              SIZE=$(sudo du -sh "$target" 2>/dev/null | cut -f1)
+              echo "🧹 删除 $target (约 $SIZE)..."
+              sudo rm -rf "$target"
+            fi
+          done
+        done
+        shopt -u nullglob
+
+        echo "🧹 清理临时目录..."
+        sudo rm -rf /tmp/* /var/tmp/* || true
+
+        AFTER_MB=$(df -m / | tail -1 | awk '{print $4}')
+        DIFF_MB=$((AFTER_MB - BEFORE_MB))
+
+        if [ "$DIFF_MB" -gt 0 ]; then
+          DIFF_GB=$(awk "BEGIN {printf \"%.2f\", $DIFF_MB/1024}")
+          echo "✅ 释放空间约 ${DIFF_GB}GB"
+        else
+          echo "ℹ️ 清理后可用空间变化不明显"
+        fi
+
+        echo "📊 当前根分区可用:"
+        df -h /
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
